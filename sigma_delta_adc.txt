@@ -1,0 +1,47 @@
+module sigma_delta_adc
+#(
+    parameter W = 16,
+    parameter R = 8
+)
+(
+    input wire clk,
+    input wire rst_n,
+
+    input wire signed [W-1:0] din,
+
+    output wire [31:0] data_out,
+    output wire valid
+);
+
+wire pdm_stream;
+
+//-----------------------------
+// Sigma Delta Modulator
+//-----------------------------
+sigma_delta_modulator #(
+    .W(W)
+)
+MOD
+(
+    .clk(clk),
+    .rst_n(rst_n),
+    .din(din),
+    .dout(pdm_stream)
+);
+
+//-----------------------------
+// CIC Filter
+//-----------------------------
+cic_filter #(
+    .R(R)
+)
+CIC
+(
+    .clk(clk),
+    .rst_n(rst_n),
+    .pdm_in(pdm_stream),
+    .data_out(data_out),
+    .valid(valid)
+);
+
+endmodule

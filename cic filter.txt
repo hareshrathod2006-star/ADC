@@ -1,53 +1,70 @@
-module tb_cic_filter;
-
-reg clk;
-reg rst_n;
-reg pdm_in;
-
-wire [31:0] data_out;
-
-cic_filter #(
-    .R(4)
-) dut (
-    .clk(clk),
-    .rst_n(rst_n),
-    .pdm_in(pdm_in),
-    .data_out(data_out)
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Module Name: cic_filter (updated for configurable output resolution)
+//
+// CHANGE FROM ORIGINAL: added OUT_BITS parameter. The old version always
+// normalized data_out back down to the DAC's native +-16384 (14-bit) scale,
+// which throws away the extra fractional precision that oversampling buys
+// you. Now the shift target is OUT_BITS instead of a fixed 14, so a wider
+// OUT_BITS keeps more of the CIC's processing gain as real output resolution
+// (finer LSB steps) instead of discarding it.
+//
+// Example: R=512, OUT_BITS=20 -> full-scale input (+-16384) now maps to
+// roughly +-524288 (2^19) in data_out, i.e. a real 20-bit signed value,
+// instead of collapsing back down to +-16384 like before.
+//////////////////////////////////////////////////////////////////////////////////
+module cic_filter
+#(
+    parameter R = 8,
+    parameter OUT_BITS = 20      // <-- NEW: desired output resolution (signed bits)
+)
+(
+    input wire clk,
+    input wire rst_n,
+    input wire pdm_in,
+    output wire signed [31:0] data_out,
+    output wire valid
 );
+wire signed [31:0] cic_in;
+assign cic_in = pdm_in ? 32'sd1 : -32'sd1;
 
-// Clock
-always #5 clk = ~clk;
+wire signed [31:0] int1_out, int2_out, int3_out;
+wire signed [31:0] ds_out;
+wire valid_internal;
+wire signed [31:0] comb1_out, comb2_out, comb3_out;
 
-// Stimulus
-initial begin
+cic_integrator #(.IN_WIDTH(32), .OUT_WIDTH(32)) u1
+(.clk(clk), .rst_n(rst_n), .din(cic_in),   .dout(int1_out));
+cic_integrator #(.IN_WIDTH(32), .OUT_WIDTH(32)) u2
+(.clk(clk), .rst_n(rst_n), .din(int1_out), .dout(int2_out));
+cic_integrator #(.IN_WIDTH(32), .OUT_WIDTH(32)) u3
+(.clk(clk), .rst_n(rst_n), .din(int2_out), .dout(int3_out));
 
-    clk = 0;
-    rst_n = 0;
-    pdm_in = 0;
+downsampler #(.WIDTH(32), .R(R)) u4
+(.clk(clk), .rst_n(rst_n), .din(int3_out), .dout(ds_out), .valid(valid_internal));
 
-    #20;
-    rst_n = 1;
+cic_comb #(.WIDTH(32)) u5
+(.clk(clk), .rst_n(rst_n), .valid(valid_internal), .din(ds_out),    .dout(comb1_out));
+cic_comb #(.WIDTH(32)) u6
+(.clk(clk), .rst_n(rst_n), .valid(valid_internal), .din(comb1_out), .dout(comb2_out));
+cic_comb #(.WIDTH(32)) u7
+(.clk(clk), .rst_n(rst_n), .valid(valid_internal), .din(comb2_out), .dout(comb3_out));
 
-    pdm_in = 1;
-    #10;
-    pdm_in = 1;
-    #10;
-    pdm_in = 0;
-    #10;
-    pdm_in = 1;
-    #10;
-    pdm_in = 0;
-    #10;
-    pdm_in = 1;
-    #10;
-    pdm_in = 1;
-    #10;
-    pdm_in = 0;
+//--------------------------------------------------
+// Output scaling
+// - CIC processing gain (3 stages) = R^3, i.e. CIC_GAIN_BITS = 3*log2(R)
+// - Old behavior: always normalize back to the DAC's native 14-bit scale
+//   (SHIFT = CIC_GAIN_BITS - 14), which discards any resolution beyond
+//   the original DAC width no matter how large R is.
+// - New behavior: normalize to OUT_BITS instead, so a bigger R actually
+//   buys you a wider/finer output as intended.
+// - RAW_SHIFT can go negative if R isn't large enough yet to natively
+//   supply OUT_BITS of gain; in that case we left-shift (pad) instead.
+//--------------------------------------------------
+localparam integer CIC_GAIN_BITS = 3*$clog2(R);
+localparam integer RAW_SHIFT     = CIC_GAIN_BITS - (OUT_BITS - 1);
 
-    #100;
-
-    $finish;
-
-end
-
+assign data_out = (RAW_SHIFT >= 0) ? (comb3_out >>> RAW_SHIFT)
+                                    : (comb3_out <<< (-RAW_SHIFT));
+assign valid = valid_internal;
 endmodule

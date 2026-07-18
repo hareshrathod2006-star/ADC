@@ -1,0 +1,12 @@
+module comparator
+#(
+    parameter W = 32
+)
+(
+    input wire signed [W-1:0] din,
+    output wire dout
+);
+
+assign dout = (din >= 0);
+
+endmodule

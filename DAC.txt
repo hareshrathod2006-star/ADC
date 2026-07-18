@@ -1,0 +1,16 @@
+module dac1bit
+#(
+    parameter W = 16
+)
+(
+    input wire din,
+    output wire signed [W-1:0] dout
+);
+
+// Reduced feedback amplitude
+localparam signed [W-1:0] POS = 16'sd16384;
+localparam signed [W-1:0] NEG = -16'sd16384;
+
+assign dout = din ? POS : NEG;
+
+endmodule

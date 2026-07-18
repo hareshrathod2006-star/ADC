@@ -1,0 +1,70 @@
+module sigma_delta_modulator
+#(
+    parameter W = 16
+)
+(
+    input wire clk,
+    input wire rst_n,
+
+    input wire signed [W-1:0] din,
+
+    output wire dout
+);
+
+//--------------------------------------------------
+// DAC Feedback
+//--------------------------------------------------
+
+wire signed [W-1:0] dac_out;
+
+dac1bit #(
+    .W(W)
+)
+DAC
+(
+    .din(dout),
+    .dout(dac_out)
+);
+
+//--------------------------------------------------
+// Error Calculation
+//--------------------------------------------------
+
+wire signed [31:0] error;
+
+assign error = $signed(din) - $signed(dac_out);
+
+//--------------------------------------------------
+// Integrator
+//--------------------------------------------------
+
+wire signed [31:0] integrator_out;
+
+integrator
+#(
+    .IN_WIDTH(32),
+    .OUT_WIDTH(32)
+)
+INT1
+(
+    .clk(clk),
+    .rst_n(rst_n),
+    .din(error),
+    .dout(integrator_out)
+);
+
+//--------------------------------------------------
+// Comparator
+//--------------------------------------------------
+
+comparator
+#(
+    .W(32)
+)
+COMP
+(
+    .din(integrator_out),
+    .dout(dout)
+);
+
+endmodule
